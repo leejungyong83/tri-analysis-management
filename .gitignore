@@ -1,0 +1,38 @@
+# --- Secrets (never commit) ---
+.omc/state/app-token.txt
+
+# --- omc tool runtime state (local logs, not project source) ---
+.omc/sessions/
+.omc/state/
+app/.omc/
+
+# --- Build artifacts ---
+*.apk
+*.aab
+*.ipa
+flutter_*.log
+
+# --- Flutter/Dart ---
+app/.dart_tool/
+app/.flutter-plugins-dependencies
+app/.pub-cache/
+app/.pub/
+app/build/
+app/coverage/
+app/android/app/debug
+app/android/app/profile
+app/android/app/release
+app/ios/Flutter/.last_build_id
+app/**/doc/api/
+
+# --- IDE ---
+app/.idea/
+app/*.iml
+app/*.ipr
+app/*.iws
+.idea/
+*.iml
+
+# --- OS ---
+.DS_Store
+Thumbs.db
