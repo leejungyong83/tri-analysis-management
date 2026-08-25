@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Supabase(HTTPS) 통신 필수. flutter run(debug)에서는 자동 주입되지만
+         release 빌드는 명시적으로 선언해야 함 — 이게 빠져 있어 실기기에서 데이터 조회가 막혔었음. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="tri_inspection_app"
         android:name="${applicationName}"

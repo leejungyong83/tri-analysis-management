@@ -199,7 +199,7 @@ begin
     and (p_date_to is null or intime::date <= p_date_to);
 
   select coalesce(jsonb_object_agg(m, stat), '{}'::jsonb) into v_by_model from (
-    select model as m, jsonb_build_object('produced', count(*), 'ng', sum((result='NG')::int), 'qty', sum(qty)) as stat
+    select coalesce(model, '(미상)') as m, jsonb_build_object('produced', count(*), 'ng', sum((result='NG')::int), 'qty', sum(qty)) as stat
     from production
     where (p_date_from is null or intime::date >= p_date_from)
       and (p_date_to is null or intime::date <= p_date_to)
@@ -330,7 +330,7 @@ $$;
 create or replace function rpc_stats(p_token text, p_date_from date, p_date_to date, p_model text) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
-  v_total int; v_ng int; v_pending_photos int;
+  v_total int; v_ng int; v_pending_photos int; v_by_model jsonb;
 begin
   perform check_token_(p_token);
   select count(*), coalesce(sum((verdict='NG')::int), 0) into v_total, v_ng
@@ -349,9 +349,21 @@ begin
     and (p_date_from is null or date >= p_date_from)
     and (p_date_to is null or date <= p_date_to);
 
+  -- 검사 기록 기준 Model별 현황 (원 GAS stats_ 의 byModel과 동일 — 이전 포팅 시 누락되어 있었음)
+  select coalesce(jsonb_object_agg(m, stat), '{}'::jsonb) into v_by_model from (
+    select coalesce(model, '(미상)') as m,
+      jsonb_build_object('total', count(*), 'ng', sum((verdict='NG')::int)) as stat
+    from inspections
+    where not void_flag
+      and (p_date_from is null or date >= p_date_from)
+      and (p_date_to is null or date <= p_date_to)
+      and (p_model is null or model = p_model)
+    group by model
+  ) t;
+
   return jsonb_build_object('ok', true, 'total', v_total, 'ng', v_ng,
     'ngRate', case when v_total=0 then 0 else v_ng::numeric/v_total end,
-    'pendingPhotos', v_pending_photos);
+    'pendingPhotos', v_pending_photos, 'byModel', v_by_model);
 end;
 $$;
 
@@ -386,6 +398,52 @@ begin
 end;
 $$;
 
+-- ============================================================ 실이력(엑셀) 이전용 컬럼 (2026-08-25)
+alter table production add column if not exists producer text;
+alter table production add column if not exists legacy_import boolean not null default false;
+alter table production add column if not exists stub boolean not null default false; -- 생산이력 누락, 검사기록에서 역산 생성
+alter table inspections add column if not exists legacy_import boolean not null default false; -- Rack1~5가 실제 개별판정 아닌 종합결과 복제임을 표시
+alter table production alter column qty drop not null; -- 과거 이력 일부는 수량 미기재
+alter table production alter column model drop not null; -- 과거 이력 일부는 모델명 미기재
+alter table inspections alter column model drop not null; -- 과거 이력 일부는 모델명 미기재
+
+-- ============================================================ 실이력 일괄 삽입 RPC (대용량 배치 삽입 전용)
+create or replace function rpc_bulk_import_production(p_token text, p_rows jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform check_token_(p_token);
+  insert into production (lot, model, qty, intime, producer, result, rework, rework_time, rework_qty, status, legacy_import, stub)
+  select lot, model, qty, intime, producer, result, rework, rework_time, rework_qty, status, true, coalesce(stub, false)
+  from jsonb_to_recordset(p_rows) as x(
+    lot text, model text, qty int, intime timestamptz, producer text,
+    result text, rework text, rework_time timestamptz, rework_qty int, status text, stub boolean
+  )
+  on conflict (lot) do nothing;
+  return jsonb_build_object('ok', true, 'batch_size', jsonb_array_length(p_rows));
+end;
+$$;
+
+create or replace function rpc_bulk_import_inspections(p_token text, p_rows jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform check_token_(p_token);
+  insert into inspections (uuid, date, ca, inspector, lot, time, bar, model,
+    rack1, rack2, rack3, rack4, rack5, photo1, photo2, photo3, photo4, photo5,
+    rework_flag, void_flag, server_time, skew, legacy_import)
+  select uuid, date, ca, inspector, lot, time, bar, model,
+    rack1, rack2, rack3, rack4, rack5, photo1, photo2, photo3, photo4, photo5,
+    rework_flag, void_flag, server_time, skew, true
+  from jsonb_to_recordset(p_rows) as x(
+    uuid uuid, date date, ca text, inspector text, lot text, time text, bar text, model text,
+    rack1 text, rack2 text, rack3 text, rack4 text, rack5 text,
+    photo1 text, photo2 text, photo3 text, photo4 text, photo5 text,
+    rework_flag text, void_flag boolean, server_time timestamptz, skew text
+  )
+  on conflict (uuid) do nothing;
+  return jsonb_build_object('ok', true, 'batch_size', jsonb_array_length(p_rows));
+end;
+$$;
+
 -- ============================================================ RLS: 테이블 직접 접근 차단, RPC로만 접근
 alter table production enable row level security;
 alter table inspections enable row level security;
@@ -397,7 +455,8 @@ alter table app_config enable row level security;
 revoke all on production, inspections, masters, app_config from anon, authenticated;
 grant execute on function
   rpc_produce, rpc_list_uninspected, rpc_rework_input, rpc_production_list, rpc_production_stats,
-  rpc_submit, rpc_attach_photo, rpc_list, rpc_stats, rpc_void, rpc_masters
+  rpc_submit, rpc_attach_photo, rpc_list, rpc_stats, rpc_void, rpc_masters,
+  rpc_bulk_import_production, rpc_bulk_import_inspections
   to anon, authenticated;
 
 -- ============================================================ Storage 버킷 (Rack별 증빙 사진)
@@ -415,6 +474,14 @@ drop policy if exists "tri-photos public read" on storage.objects;
 create policy "tri-photos public read"
   on storage.objects for select to anon
   using (bucket_id = 'tri-photos');
+
+-- x-upsert:true 재업로드(이미 존재하는 경로 덮어쓰기) 시 update 경로를 타므로 별도 필요
+-- (없으면 "new row violates row-level security policy" 로 재시도가 막힘 — 2026-08-25 실사용 중 발견)
+drop policy if exists "tri-photos anon update" on storage.objects;
+create policy "tri-photos anon update"
+  on storage.objects for update to anon
+  using (bucket_id = 'tri-photos')
+  with check (bucket_id = 'tri-photos');
 
 -- ============================================================ 완료 후 확인
 -- select value as app_token from app_config where key = 'app_token';  -- 앱 설정에 입력할 토큰

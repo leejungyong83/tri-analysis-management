@@ -1,3 +1,4 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
 import '../core/app_settings.dart';
@@ -182,7 +183,9 @@ class DashboardScreenState extends State<DashboardScreen> {
             EmptyState(
                 message: S.t(context, 'noData'),
                 icon: Icons.bar_chart_outlined)
-          else
+          else ...[
+            _modelBarChart(context, byModel),
+            const SizedBox(height: AppSpacing.md),
             MetricTable(
               columns: [
                 S.t(context, 'model'),
@@ -196,6 +199,7 @@ class DashboardScreenState extends State<DashboardScreen> {
                   _modelRow(context, entry.key, entry.value as Map),
               ],
             ),
+          ],
           const Divider(),
 
           // ── 5. 기간별 추이 (일별 생산·NG) ────────────────────────────────
@@ -386,7 +390,9 @@ class DashboardScreenState extends State<DashboardScreen> {
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: context.scheme.onSurfaceVariant)),
           )
-        else
+        else ...[
+          _trendLineChart(context, byDay),
+          const SizedBox(height: AppSpacing.md),
           MetricTable(
             columns: [
               S.t(context, 'date'),
@@ -409,7 +415,254 @@ class DashboardScreenState extends State<DashboardScreen> {
                 ],
             ],
           ),
+        ],
       ],
     );
+  }
+
+  /// Model별 막대그래프 — 총건수(파랑)와 NG(빨강)를 나란히. 상위 8개만(표는 전체).
+  Widget _modelBarChart(BuildContext context, Map<String, dynamic> byModel) {
+    final st = context.status;
+    final entries = byModel.entries.toList()
+      ..sort((a, b) => ((b.value as Map)['total'] as num? ?? 0)
+          .compareTo((a.value as Map)['total'] as num? ?? 0));
+    final top = entries.take(8).toList();
+    final maxY = top.fold<double>(
+        1, (m, e) => e.value['total'] as num > m ? (e.value['total'] as num).toDouble() : m);
+
+    return Container(
+      height: 220,
+      padding: const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.md, AppSpacing.md, AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: context.scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: context.scheme.outlineVariant),
+      ),
+      child: BarChart(
+        BarChartData(
+          maxY: maxY * 1.35, // 막대 끝 라벨 여백
+          alignment: BarChartAlignment.spaceAround,
+          gridData: FlGridData(
+            drawVerticalLine: false,
+            horizontalInterval: (maxY / 4).clamp(1, double.infinity),
+            getDrawingHorizontalLine: (_) =>
+                FlLine(color: context.scheme.outlineVariant, strokeWidth: 1),
+          ),
+          borderData: FlBorderData(show: false),
+          titlesData: FlTitlesData(
+            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 30,
+                getTitlesWidget: (v, meta) => Text('${v.toInt()}',
+                    style: Theme.of(context).textTheme.labelSmall),
+              ),
+            ),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 42,
+                getTitlesWidget: (v, meta) {
+                  final i = v.toInt();
+                  if (i < 0 || i >= top.length) return const SizedBox.shrink();
+                  final name = top[i].key;
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Transform.rotate(
+                      angle: -0.5,
+                      child: Text(
+                        name.length > 8 ? '${name.substring(0, 8)}…' : name,
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+          barTouchData: BarTouchData(
+            enabled: false, // 터치 대신 항상-표시 라벨(아래 showingTooltipIndicators) 사용
+            touchTooltipData: BarTouchTooltipData(
+              getTooltipColor: (_) => Colors.transparent,
+              tooltipPadding: EdgeInsets.zero,
+              tooltipMargin: 4,
+              getTooltipItem: (group, gi, rod, ri) => BarTooltipItem(
+                rod.toY.toInt() == 0 ? '' : '${rod.toY.toInt()}',
+                Theme.of(context).textTheme.labelSmall!.copyWith(
+                    color: rod.color, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
+          barGroups: [
+            for (var i = 0; i < top.length; i++)
+              BarChartGroupData(
+                x: i,
+                barRods: [
+                  BarChartRodData(
+                    toY: ((top[i].value as Map)['total'] as num? ?? 0).toDouble(),
+                    color: st.chart[2], // blue — 총 검사건수
+                    width: 10,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  BarChartRodData(
+                    toY: ((top[i].value as Map)['ng'] as num? ?? 0).toDouble(),
+                    color: st.chart[1], // red — NG
+                    width: 10,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ],
+                barsSpace: 4,
+                showingTooltipIndicators: [0, 1], // 막대 끝에 값 항상 표시
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 기간별 추이 라인차트 — 생산(파랑) vs NG(빨강).
+  Widget _trendLineChart(BuildContext context, Map<String, dynamic> byDay) {
+    final st = context.status;
+    final days = byDay.keys.toList()..sort();
+    final prodSpots = <FlSpot>[];
+    final ngSpots = <FlSpot>[];
+    var maxY = 1.0;
+    for (var i = 0; i < days.length; i++) {
+      final m = byDay[days[i]] as Map;
+      final produced = (m['produced'] as num? ?? 0).toDouble();
+      final ng = (m['ng'] as num? ?? 0).toDouble();
+      prodSpots.add(FlSpot(i.toDouble(), produced));
+      ngSpots.add(FlSpot(i.toDouble(), ng));
+      if (produced > maxY) maxY = produced;
+    }
+    final step = (days.length / 6).ceil().clamp(1, 999);
+
+    // 라인 끝점에 값을 항상 표시하기 위해 BarData를 미리 만들어 참조를 들고 있는다.
+    final prodLine = LineChartBarData(
+      spots: prodSpots,
+      isCurved: true,
+      color: st.chart[2],
+      barWidth: 2,
+      dotData: FlDotData(
+        show: true,
+        checkToShowDot: (spot, bar) =>
+            prodSpots.isNotEmpty && spot.x == prodSpots.last.x,
+        getDotPainter: (spot, pct, bar, index) =>
+            FlDotCirclePainter(radius: 3, color: st.chart[2], strokeWidth: 0),
+      ),
+      belowBarData:
+          BarAreaData(show: true, color: st.chart[2].withValues(alpha: 0.08)),
+    );
+    final ngLine = LineChartBarData(
+      spots: ngSpots,
+      isCurved: true,
+      color: st.chart[1],
+      barWidth: 2,
+      dotData: FlDotData(
+        show: true,
+        checkToShowDot: (spot, bar) =>
+            ngSpots.isNotEmpty && spot.x == ngSpots.last.x,
+        getDotPainter: (spot, pct, bar, index) =>
+            FlDotCirclePainter(radius: 3, color: st.chart[1], strokeWidth: 0),
+      ),
+    );
+
+    return Container(
+      height: 220,
+      padding: const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.md, AppSpacing.md, AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: context.scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: context.scheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            _legendDot(context, st.chart[2], S.t(context, 'prodTotal')),
+            const SizedBox(width: AppSpacing.md),
+            _legendDot(context, st.chart[1], 'NG'),
+          ]),
+          const SizedBox(height: AppSpacing.sm),
+          Expanded(
+            child: LineChart(
+              LineChartData(
+                minY: 0,
+                maxY: maxY * 1.3, // 끝점 라벨 여백
+                gridData: FlGridData(
+                  drawVerticalLine: false,
+                  horizontalInterval: (maxY / 4).clamp(1, double.infinity),
+                  getDrawingHorizontalLine: (_) =>
+                      FlLine(color: context.scheme.outlineVariant, strokeWidth: 1),
+                ),
+                borderData: FlBorderData(show: false),
+                titlesData: FlTitlesData(
+                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 30,
+                      getTitlesWidget: (v, meta) => Text('${v.toInt()}',
+                          style: Theme.of(context).textTheme.labelSmall),
+                    ),
+                  ),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 24,
+                      interval: step.toDouble(),
+                      getTitlesWidget: (v, meta) {
+                        final i = v.toInt();
+                        if (i < 0 || i >= days.length) return const SizedBox.shrink();
+                        return Text(days[i].substring(5), // MM-DD
+                            style: Theme.of(context).textTheme.labelSmall);
+                      },
+                    ),
+                  ),
+                ),
+                lineTouchData: LineTouchData(
+                  handleBuiltInTouches: true,
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipColor: (_) => Colors.transparent,
+                    tooltipPadding: EdgeInsets.zero,
+                    tooltipMargin: 4,
+                    getTooltipItems: (spots) => spots
+                        .map((s) => LineTooltipItem(
+                              '${s.y.toInt()}',
+                              Theme.of(context).textTheme.labelSmall!.copyWith(
+                                  color: s.bar.color, fontWeight: FontWeight.w700),
+                            ))
+                        .toList(),
+                  ),
+                ),
+                lineBarsData: [prodLine, ngLine],
+                // 끝점(가장 최근 날짜)에 값을 항상 표시
+                showingTooltipIndicators: prodSpots.isEmpty
+                    ? []
+                    : [
+                        ShowingTooltipIndicators([
+                          LineBarSpot(prodLine, 0, prodSpots.last),
+                          LineBarSpot(ngLine, 1, ngSpots.last),
+                        ]),
+                      ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _legendDot(BuildContext context, Color color, String label) {
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Container(
+          width: 8, height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+      const SizedBox(width: 4),
+      Text(label, style: Theme.of(context).textTheme.labelSmall),
+    ]);
   }
 }
