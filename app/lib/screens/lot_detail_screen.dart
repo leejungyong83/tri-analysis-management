@@ -13,8 +13,14 @@ import '../widgets/ui_kit.dart';
 class LotDetailScreen extends StatefulWidget {
   final ApiClient api;
   final RemoteRecord record;
+  final bool isAdmin; // 무효화(void)는 관리자만 — 조회는 전 역할 공통
 
-  const LotDetailScreen({super.key, required this.api, required this.record});
+  const LotDetailScreen({
+    super.key,
+    required this.api,
+    required this.record,
+    this.isAdmin = false,
+  });
 
   @override
   State<LotDetailScreen> createState() => _LotDetailScreenState();
@@ -134,7 +140,7 @@ class _LotDetailScreenState extends State<LotDetailScreen> {
           ),
           const SizedBox(height: AppSpacing.lg),
 
-          if (!r.voided)
+          if (!r.voided && widget.isAdmin)
             OutlinedButton.icon(
               onPressed: _voiding ? null : _confirmVoid,
               icon: _voiding

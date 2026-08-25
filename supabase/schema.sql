@@ -444,6 +444,157 @@ begin
 end;
 $$;
 
+-- ============================================================ 계정 역할 관리 (앱 내 관리자 화면용, 2026-08-25)
+-- 이 두 함수는 anon 토큰이 아니라 "로그인한 사용자의 실제 세션(JWT)"으로 호출되어야
+-- auth.uid()가 채워진다 — Flutter에서 Supabase.instance.client.rpc(...)로 호출(anon key
+-- 고정 방식의 기존 ApiClient와는 별개 경로). authenticated 역할에만 grant.
+create or replace function rpc_list_users() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  v_caller_role text;
+begin
+  select raw_user_meta_data->>'role' into v_caller_role from auth.users where id = auth.uid();
+  if v_caller_role is distinct from 'admin' then
+    raise exception 'FORBIDDEN' using errcode = '42501';
+  end if;
+  return (
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'id', id, 'email', email,
+      'role', coalesce(raw_user_meta_data->>'role', 'inspector'),
+      'createdAt', created_at
+    ) order by created_at), '[]'::jsonb)
+    from auth.users
+  );
+end;
+$$;
+
+create or replace function rpc_set_user_role(target_user_id uuid, new_role text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  v_caller_role text;
+begin
+  if new_role not in ('admin', 'inspector') then
+    raise exception 'INVALID_ROLE';
+  end if;
+  select raw_user_meta_data->>'role' into v_caller_role from auth.users where id = auth.uid();
+  if v_caller_role is distinct from 'admin' then
+    raise exception 'FORBIDDEN' using errcode = '42501';
+  end if;
+  update auth.users
+    set raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || jsonb_build_object('role', new_role)
+    where id = target_user_id;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+grant execute on function rpc_list_users, rpc_set_user_role to authenticated;
+
+-- ============================================================ 관리자 전용: 전체 CRUD (2026-08-25)
+-- 아래 함수들도 rpc_list_users와 동일하게 "로그인한 사용자의 실제 세션"으로 호출해야
+-- auth.uid()가 채워진다 — Flutter에서 Supabase.instance.client.rpc(...) 사용.
+-- 원 설계(오입력은 void+재입력, 행 삭제 없음)를 관리자 한정으로 우회하는 기능이므로
+-- 신중히 사용할 것 — 삭제는 되돌릴 수 없다.
+create or replace function require_admin_() returns void
+language plpgsql as $$
+declare v_role text;
+begin
+  select raw_user_meta_data->>'role' into v_role from auth.users where id = auth.uid();
+  if v_role is distinct from 'admin' then
+    raise exception 'FORBIDDEN' using errcode = '42501';
+  end if;
+end;
+$$;
+
+-- ── Masters (검사자/모델/CA) CRUD ──
+create or replace function rpc_admin_add_master(p_kind text, p_value text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform require_admin_();
+  insert into masters (kind, value) values (p_kind, p_value) on conflict do nothing;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+create or replace function rpc_admin_delete_master(p_kind text, p_value text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform require_admin_();
+  delete from masters where kind = p_kind and value = p_value;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+-- ── Production CRUD ──
+create or replace function rpc_admin_create_production(
+  p_lot text, p_model text, p_qty int, p_intime timestamptz, p_producer text
+) returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_lot text;
+begin
+  perform require_admin_();
+  v_lot := coalesce(nullif(p_lot, ''), generate_lot_(p_intime::date));
+  insert into production (lot, model, qty, intime, producer, status)
+    values (v_lot, p_model, p_qty, p_intime, p_producer, 'PRODUCED')
+    on conflict (lot) do nothing;
+  return jsonb_build_object('ok', true, 'lot', v_lot);
+end;
+$$;
+
+create or replace function rpc_admin_update_production(
+  p_lot text, p_model text, p_qty int, p_producer text, p_status text, p_result text
+) returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  perform require_admin_();
+  update production set
+    model = coalesce(p_model, model),
+    qty = p_qty,
+    producer = p_producer,
+    status = coalesce(p_status, status),
+    result = coalesce(p_result, result)
+  where lot = p_lot;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+create or replace function rpc_admin_delete_production(p_lot text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform require_admin_();
+  delete from inspections where lot = p_lot; -- FK 참조 — 함께 삭제(되돌릴 수 없음)
+  delete from production where lot = p_lot;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+-- ── Inspections CRUD ──
+create or replace function rpc_admin_update_inspection(
+  p_uuid uuid, p_ca text, p_inspector text, p_lot text, p_time text, p_bar text, p_model text,
+  p_rack1 text, p_rack2 text, p_rack3 text, p_rack4 text, p_rack5 text
+) returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  perform require_admin_();
+  update inspections set
+    ca = p_ca, inspector = p_inspector, lot = p_lot, time = p_time, bar = p_bar, model = p_model,
+    rack1 = p_rack1, rack2 = p_rack2, rack3 = p_rack3, rack4 = p_rack4, rack5 = p_rack5
+  where uuid = p_uuid;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+create or replace function rpc_admin_delete_inspection(p_uuid uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform require_admin_();
+  delete from inspections where uuid = p_uuid;
+  return jsonb_build_object('ok', true);
+end;
+$$;
+
+grant execute on function
+  rpc_admin_add_master, rpc_admin_delete_master,
+  rpc_admin_create_production, rpc_admin_update_production, rpc_admin_delete_production,
+  rpc_admin_update_inspection, rpc_admin_delete_inspection
+  to authenticated;
+
 -- ============================================================ RLS: 테이블 직접 접근 차단, RPC로만 접근
 alter table production enable row level security;
 alter table inspections enable row level security;

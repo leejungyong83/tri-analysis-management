@@ -36,3 +36,6 @@ app/*.iws
 # --- OS ---
 .DS_Store
 Thumbs.db
+
+# --- Cloudflare Wrangler (deploy tool local cache) ---
+.wrangler/

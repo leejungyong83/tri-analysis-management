@@ -13,8 +13,14 @@ import 'lot_detail_screen.dart';
 class HistoryScreen extends StatefulWidget {
   final ApiClient api;
   final MasterCache masters;
+  final bool isAdmin; // 무효화(void)는 관리자만 — 조회는 전 역할 공통
 
-  const HistoryScreen({super.key, required this.api, required this.masters});
+  const HistoryScreen({
+    super.key,
+    required this.api,
+    required this.masters,
+    this.isAdmin = false,
+  });
 
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
@@ -224,7 +230,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
         onTap: () async {
           final changed = await Navigator.of(context).push<bool>(
             MaterialPageRoute(
-              builder: (_) => LotDetailScreen(api: widget.api, record: r),
+              builder: (_) => LotDetailScreen(
+                  api: widget.api, record: r, isAdmin: widget.isAdmin),
             ),
           );
           if (changed == true) _search();

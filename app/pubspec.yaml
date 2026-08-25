@@ -24,6 +24,7 @@ dependencies:
   url_launcher: ^6.3.0
   intl: any
   fl_chart: ^0.70.2
+  supabase_flutter: ^2.8.0
 
 dev_dependencies:
   flutter_test:
@@ -32,3 +33,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/logo.png

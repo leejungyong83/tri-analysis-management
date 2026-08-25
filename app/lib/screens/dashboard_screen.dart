@@ -1,5 +1,6 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../core/app_settings.dart';
 import '../core/ict_time.dart';
@@ -23,6 +24,15 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class DashboardScreenState extends State<DashboardScreen> {
+  static final _thousands = NumberFormat('#,###');
+
+  /// 천단위 구분기호(,) 포맷 — null/파싱불가는 '—'.
+  static String _fmt(dynamic v) {
+    if (v == null) return '—';
+    final n = v is num ? v : num.tryParse('$v');
+    return n == null ? '$v' : _thousands.format(n);
+  }
+
   /// 탭 진입 시 HomeShell이 호출 — 대시보드는 열 때마다 최신 데이터로 갱신한다
   /// (앱 시작 시 API 미설정 상태에서 실행됐던 초기 조회 오류를 덮어씀).
   void refresh() => _refresh();
@@ -144,13 +154,13 @@ class DashboardScreenState extends State<DashboardScreen> {
           _kpiRow([
             KpiCard(
               label: S.t(context, 'total'),
-              value: '${total ?? '—'}',
+              value: _fmt(total),
               icon: Icons.inventory_2_outlined,
               tone: StatusKind.neutral,
             ),
             KpiCard(
               label: S.t(context, 'ngCount'),
-              value: '${ng ?? '—'}',
+              value: _fmt(ng),
               icon: Icons.cancel_outlined,
               tone: (ng is num && ng > 0) ? StatusKind.fail : StatusKind.neutral,
               emphasizeValue: true,
@@ -168,7 +178,7 @@ class DashboardScreenState extends State<DashboardScreen> {
           KpiCard(
             label: S.t(context, 'pendingPhotos'),
             value:
-                '${(s?['pendingPhotos'] ?? 0)}${widget.queue.pendingPhotos > 0 ? ' +${widget.queue.pendingPhotos}' : ''}',
+                '${_fmt(s?['pendingPhotos'] ?? 0)}${widget.queue.pendingPhotos > 0 ? ' +${_fmt(widget.queue.pendingPhotos)}' : ''}',
             icon: Icons.cloud_upload_outlined,
             tone: ((s?['pendingPhotos'] as num?) ?? 0) + widget.queue.pendingPhotos > 0
                 ? StatusKind.process
@@ -212,16 +222,16 @@ class DashboardScreenState extends State<DashboardScreen> {
           _kpiRow([
             KpiCard(
               label: S.t(context, 'myToday'),
-              value: '${_myToday + queuedToday}',
+              value: _fmt(_myToday + queuedToday),
               icon: Icons.fact_check_outlined,
               caption: queuedToday > 0
-                  ? '+$queuedToday ${S.t(context, 'pendingRecords')}'
+                  ? '+${_fmt(queuedToday)} ${S.t(context, 'pendingRecords')}'
                   : null,
               tone: StatusKind.info,
             ),
             KpiCard(
               label: S.t(context, 'myNg'),
-              value: '$_myTodayNg',
+              value: _fmt(_myTodayNg),
               icon: Icons.report_problem_outlined,
               tone: _myTodayNg > 0 ? StatusKind.fail : StatusKind.neutral,
               emphasizeValue: true,
@@ -306,8 +316,8 @@ class DashboardScreenState extends State<DashboardScreen> {
         : (rate > 0 ? context.status.fail : context.scheme.onSurfaceVariant);
     return [
       MetricTable.cell(context, model, bold: true),
-      MetricTable.cell(context, '${m['total']}', align: TextAlign.end),
-      MetricTable.cell(context, '${m['ng']}',
+      MetricTable.cell(context, _fmt(m['total']), align: TextAlign.end),
+      MetricTable.cell(context, _fmt(m['ng']),
           align: TextAlign.end,
           color: ng > 0 ? context.status.fail : null),
       MetricTable.cell(
@@ -333,13 +343,13 @@ class DashboardScreenState extends State<DashboardScreen> {
         _kpiRow([
           KpiCard(
             label: S.t(context, 'prodTotal'),
-            value: '${p?['produced'] ?? '—'}',
+            value: _fmt(p?['produced']),
             icon: Icons.precision_manufacturing_outlined,
             tone: StatusKind.neutral,
           ),
           KpiCard(
             label: S.t(context, 'prodQty'),
-            value: '${p?['qtySum'] ?? '—'}',
+            value: _fmt(p?['qtySum']),
             icon: Icons.layers_outlined,
             tone: StatusKind.neutral,
           ),
@@ -355,7 +365,7 @@ class DashboardScreenState extends State<DashboardScreen> {
           ),
           KpiCard(
             label: S.t(context, 'uninspectedCnt'),
-            value: '${uninspected ?? '—'}',
+            value: _fmt(uninspected),
             icon: Icons.pending_actions_outlined,
             tone: (uninspected is num && uninspected > 0)
                 ? StatusKind.warning
@@ -405,9 +415,9 @@ class DashboardScreenState extends State<DashboardScreen> {
                 ..sort((a, b) => b.key.compareTo(a.key))))
                 [
                   MetricTable.cell(context, e.key),
-                  MetricTable.cell(context, '${(e.value as Map)['produced']}',
+                  MetricTable.cell(context, _fmt((e.value as Map)['produced']),
                       align: TextAlign.end),
-                  MetricTable.cell(context, '${(e.value as Map)['ng']}',
+                  MetricTable.cell(context, _fmt((e.value as Map)['ng']),
                       align: TextAlign.end,
                       color: (((e.value as Map)['ng'] as num?) ?? 0) > 0
                           ? context.status.fail
@@ -456,7 +466,7 @@ class DashboardScreenState extends State<DashboardScreen> {
               sideTitles: SideTitles(
                 showTitles: true,
                 reservedSize: 30,
-                getTitlesWidget: (v, meta) => Text('${v.toInt()}',
+                getTitlesWidget: (v, meta) => Text(_fmt(v.toInt()),
                     style: Theme.of(context).textTheme.labelSmall),
               ),
             ),
@@ -489,7 +499,7 @@ class DashboardScreenState extends State<DashboardScreen> {
               tooltipPadding: EdgeInsets.zero,
               tooltipMargin: 4,
               getTooltipItem: (group, gi, rod, ri) => BarTooltipItem(
-                rod.toY.toInt() == 0 ? '' : '${rod.toY.toInt()}',
+                rod.toY.toInt() == 0 ? '' : _fmt(rod.toY.toInt()),
                 Theme.of(context).textTheme.labelSmall!.copyWith(
                     color: rod.color, fontWeight: FontWeight.w700),
               ),
@@ -631,7 +641,7 @@ class DashboardScreenState extends State<DashboardScreen> {
                     tooltipMargin: 4,
                     getTooltipItems: (spots) => spots
                         .map((s) => LineTooltipItem(
-                              '${s.y.toInt()}',
+                              _fmt(s.y.toInt()),
                               Theme.of(context).textTheme.labelSmall!.copyWith(
                                   color: s.bar.color, fontWeight: FontWeight.w700),
                             ))

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/app_settings.dart';
 import '../core/strings.dart';
@@ -7,6 +8,9 @@ import '../services/master_cache.dart';
 import '../services/sync_queue.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ui_kit.dart';
+import 'admin_data_screen.dart';
+import 'admin_masters_screen.dart';
+import 'admin_users_screen.dart';
 
 /// 설정 — 언어 전환(vi/ko), 화면 테마, 검사자 선택(로그인 없음), 서버 URL/토큰,
 /// 동기화 상태(대기 건수·경고·수동 동기화).
@@ -14,6 +18,7 @@ class SettingsScreen extends StatefulWidget {
   final ApiClient api;
   final MasterCache masters;
   final SyncQueue queue;
+  final bool isAdmin; // 앱 토큰 변경은 관리자만 — 언어/테마/검사자 선택은 전 역할 공통
   final void Function(String locale) onLocaleChanged;
   final void Function(String themeMode) onThemeChanged;
 
@@ -22,6 +27,7 @@ class SettingsScreen extends StatefulWidget {
     required this.api,
     required this.masters,
     required this.queue,
+    this.isAdmin = false,
     required this.onLocaleChanged,
     required this.onThemeChanged,
   });
@@ -164,38 +170,82 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: AppSpacing.md),
 
         // ── 서버 설정 (Supabase 앱 토큰만 — URL/키는 앱에 고정, 재빌드 불요) ──
-        AppPanel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SectionHeader(S.t(context, 'appToken')),
-              const SizedBox(height: AppSpacing.sm + 2),
-              TextField(
-                controller: _tokenCtrl,
-                obscureText: true,
-                decoration: InputDecoration(
-                  labelText: S.t(context, 'appToken'),
-                  prefixIcon: const Icon(Icons.key_outlined),
+        // 잘못 바꾸면 전 기능이 멈추는 값이라 관리자만 수정 가능.
+        if (widget.isAdmin) ...[
+          AppPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SectionHeader(S.t(context, 'appToken')),
+                const SizedBox(height: AppSpacing.sm + 2),
+                TextField(
+                  controller: _tokenCtrl,
+                  obscureText: true,
+                  decoration: InputDecoration(
+                    labelText: S.t(context, 'appToken'),
+                    prefixIcon: const Icon(Icons.key_outlined),
+                  ),
                 ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              FilledButton.icon(
-                onPressed: () {
-                  AppSettings.token = _tokenCtrl.text;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(S.t(context, 'settingsSaved')),
-                    backgroundColor: context.status.pass,
-                  ));
-                },
-                icon: const Icon(Icons.save_outlined, size: 18),
-                label: Text(S.t(context, 'save')),
-                style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48)),
-              ),
-            ],
+                const SizedBox(height: AppSpacing.md),
+                FilledButton.icon(
+                  onPressed: () {
+                    AppSettings.token = _tokenCtrl.text;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(S.t(context, 'settingsSaved')),
+                      backgroundColor: context.status.pass,
+                    ));
+                  },
+                  icon: const Icon(Icons.save_outlined, size: 18),
+                  label: Text(S.t(context, 'save')),
+                  style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48)),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
+
+          // ── 계정/마스터/데이터 관리 ──────────────────────────────────────
+          AppPanel(
+            child: Column(
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AdminUsersScreen()),
+                  ),
+                  icon: const Icon(Icons.manage_accounts_outlined, size: 18),
+                  label: Text(S.t(context, 'accountMgmt')),
+                  style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48)),
+                ),
+                const SizedBox(height: AppSpacing.sm + 2),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                        builder: (_) => AdminMastersScreen(
+                            masters: widget.masters, api: widget.api)),
+                  ),
+                  icon: const Icon(Icons.badge_outlined, size: 18),
+                  label: Text(S.t(context, 'masterMgmt')),
+                  style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48)),
+                ),
+                const SizedBox(height: AppSpacing.sm + 2),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                        builder: (_) => AdminDataScreen(api: widget.api)),
+                  ),
+                  icon: const Icon(Icons.storage_outlined, size: 18),
+                  label: Text(S.t(context, 'dataMgmt')),
+                  style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+        ],
 
         // ── 동기화 상태 ──────────────────────────────────────────────────
         AppPanel(
@@ -251,6 +301,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     minimumSize: const Size.fromHeight(48)),
               ),
             ],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+
+        // ── 로그아웃 ──────────────────────────────────────────────────────
+        AppPanel(
+          child: OutlinedButton.icon(
+            onPressed: () => Supabase.instance.client.auth.signOut(),
+            icon: Icon(Icons.logout, size: 18, color: context.status.fail),
+            label: Text(S.t(context, 'logout'),
+                style: TextStyle(color: context.status.fail)),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+              side: BorderSide(color: context.status.fail.withValues(alpha: 0.4)),
+            ),
           ),
         ),
       ],
