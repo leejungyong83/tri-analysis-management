@@ -31,14 +31,12 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  late final TextEditingController _urlCtrl;
   late final TextEditingController _tokenCtrl;
   bool _refreshing = false;
 
   @override
   void initState() {
     super.initState();
-    _urlCtrl = TextEditingController(text: AppSettings.apiUrl);
     _tokenCtrl = TextEditingController(text: AppSettings.token);
     widget.queue.addListener(_onQueue);
   }
@@ -50,7 +48,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     widget.queue.removeListener(_onQueue);
-    _urlCtrl.dispose();
     _tokenCtrl.dispose();
     super.dispose();
   }
@@ -166,21 +163,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         const SizedBox(height: AppSpacing.md),
 
-        // ── 서버 설정 (재빌드 없이 변경 가능) ────────────────────────────
+        // ── 서버 설정 (Supabase 앱 토큰만 — URL/키는 앱에 고정, 재빌드 불요) ──
         AppPanel(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SectionHeader(S.t(context, 'apiUrl')),
+              SectionHeader(S.t(context, 'appToken')),
               const SizedBox(height: AppSpacing.sm + 2),
-              TextField(
-                controller: _urlCtrl,
-                decoration: InputDecoration(
-                  labelText: S.t(context, 'apiUrl'),
-                  prefixIcon: const Icon(Icons.link),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
               TextField(
                 controller: _tokenCtrl,
                 obscureText: true,
@@ -192,7 +181,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: AppSpacing.md),
               FilledButton.icon(
                 onPressed: () {
-                  AppSettings.apiUrl = _urlCtrl.text;
                   AppSettings.token = _tokenCtrl.text;
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                     content: Text(S.t(context, 'settingsSaved')),

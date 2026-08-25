@@ -22,19 +22,21 @@ TRI 공정 후 표면 시약 검사를 스마트폰으로 기록하는 현장용
 | 경로 | 내용 |
 |------|------|
 | `app/` | Flutter 앱 (Android APK + iOS용 웹 PWA — 동일 코드베이스) |
-| `gas/` | Google Apps Script 백엔드 (스프레드시트 바인딩, 토큰 보호) |
-| `SETUP.md` | 배포 가이드 (GAS 배포 → APK/웹 빌드 → 검증 체크리스트) |
+| `supabase/schema.sql` | Supabase 백엔드 (Postgres 스키마 + RPC 함수 + Storage 버킷, RLS 보호) |
+| `gas/` | (레거시) Google Apps Script 백엔드 — 2026-08-25 Supabase로 전환, 보관용 |
+| `SETUP.md` | 배포 가이드 (Supabase 설정 → APK/웹 빌드 → 검증 체크리스트) |
 | `.omc/specs/` | 요구사항 스펙 (deep-interview, 모호도 18%) |
 | `.omc/plans/` | 구현 계획 v3 (Architect+Critic 합의) |
 
 ## 아키텍처 요약
 ```
-Flutter 앱 ──(HTTPS, 공유 토큰, text/plain JSON)──▶ Apps Script Web App
-  · 로컬 큐(Hive) 선저장 → 백그라운드 전송            · Google Sheets (월별 탭)
-  · 판정 레코드 먼저, 사진(photoUUID 멱등) 후속       · Google Drive (사진)
+Flutter 앱 ──(HTTPS, PostgREST RPC, apikey+앱토큰)──▶ Supabase
+  · 로컬 큐(Hive) 선저장 → 백그라운드 전송              · Postgres (production/inspections 테이블)
+  · 판정 레코드 먼저, 사진(photoUUID 멱등) 후속         · Storage (tri-photos 버킷, Rack별 사진)
 ```
 
-- 데이터 시트: https://docs.google.com/spreadsheets/d/1WUWJz92onLbD4fF-3yy3lCq_beErjoV2aaKUVprdQz0/edit
+- Supabase 프로젝트: Project Settings → API에서 URL/키 확인 (URL·anon key는 `app/lib/services/api_client.dart`에 고정, 앱 토큰은 Settings 화면에서 입력)
+- 백엔드 로직은 `supabase/schema.sql`의 SECURITY DEFINER RPC 함수(rpc_produce/submit/attachPhoto/list/stats/void/masters 등)로 구현 — 테이블은 RLS로 직접 접근 차단, RPC 경유만 허용
 - iOS는 App Store 미경유 — 웹 빌드를 HTTPS 호스팅 후 Safari **"홈 화면에 추가"**로 설치
 
 ## 개발

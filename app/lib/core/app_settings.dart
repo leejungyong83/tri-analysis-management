@@ -6,9 +6,8 @@ class AppSettings {
 
   static Box get _box => Hive.box(boxName);
 
-  static String get apiUrl => _box.get('apiUrl', defaultValue: '') as String;
-  static set apiUrl(String v) => _box.put('apiUrl', v.trim());
-
+  /// Supabase 앱 토큰 (app_config 테이블의 app_token 값 — 로테이션 가능, 재빌드 불요).
+  /// Supabase Project URL/anon key는 api_client.dart에 상수로 고정(공개 가능한 값).
   static String get token => _box.get('token', defaultValue: '') as String;
   static set token(String v) => _box.put('token', v.trim());
 
